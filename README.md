@@ -4,9 +4,12 @@
 
 Simulation utilities for the [SciBmad](https://github.com/bmad-sim/SciBmad.jl) ecosystem.
 
-Currently this package holds the translator from SciBmad lattices, built with
-[Beamlines.jl](https://github.com/bmad-sim/Beamlines.jl), to the
-[PALS](https://github.com/pals-project/pals) (Particle Accelerator Lattice Standard) format.
+This package holds:
+- The translator from SciBmad lattices, built with
+  [Beamlines.jl](https://github.com/bmad-sim/Beamlines.jl), to the
+  [PALS](https://github.com/pals-project/pals) (Particle Accelerator Lattice Standard) format.
+  See [SciBmad to PALS translation](#scibmad-to-pals-translation).
+- Lattice layout plots drawn with Makie. See [Lattice layout plots](#lattice-layout-plots).
 
 ## Installation
 
@@ -161,3 +164,60 @@ start with `SciBmad_`. When any are present, the file declares the prefix in
 `DefExpr`s are evaluated, using the `Context` of the lattice, when the translation is done.
 The PALS file therefore holds numbers, not expressions. Values must be real numbers: for
 lattices with GTPSA or automatic differentiation types, use `scalarize` first.
+
+## Lattice layout plots
+
+A lattice layout shows the placement of the elements of a `Beamline`, `Branch` or `Lattice` 
+as a function of `s`, and is typically drawn above or below a plot of, e.g., the Twiss 
+functions. This is modeled after the Tao `lat_layout` plot. Plotting uses Makie, so a Makie 
+backend (e.g. CairoMakie or GLMakie) must be loaded. Makie is not a hard dependency of SciBmadUtils:
+the drawing functions become available when Makie is loaded.
+
+```julia
+using SciBmad, SciBmadUtils, CairoMakie
+
+# Two FODO cells with sextupoles next to the quadrupoles
+@elements begin
+  QF = Quadrupole(L = 0.5, Kn1 = 0.36)
+  QD = Quadrupole(L = 0.5, Kn1 = -0.36)
+  SF = Sextupole(L = 0.2, Kn2 = 1.0)
+  SD = Sextupole(L = 0.2, Kn2 = -1.0)
+  B  = SBend(L = 6.0, angle = π/132)
+  D1 = Drift(L = 0.6)
+  D2 = Drift(L = 1.0)
+end
+cell = [QF, SF, D1, B, D2, QD, SD, D1, B, D2]
+bl = Beamline([cell; cell], species_ref = Species("electron"), E_ref = 18e9)
+
+tw  = twiss(bl)
+fig = Figure(size = (900, 600))
+ax  = Axis(fig[2, 1], xlabel = "s [m]", ylabel = "β [m]")
+lines!(ax, tw.s, tw.beta1, label = "β₁")
+lines!(ax, tw.s, tw.beta2, label = "β₂")
+axislegend(ax, position = :rt)
+lat_layout(fig[1, 1], bl; link = ax, height = 150)   # Layout above the plot. Use fig[3, 1] for below.
+fig
+```
+
+![Lattice layout above a plot of the beta functions](assets/lat_layout_example.png)
+
+- `lat_layout(gridpos, line; link, ...)` creates a new axis; `lat_layout!(ax, line; ...)` draws into an existing one.
+- Available shapes: `:box`, `:xbox`, `:x`, `:circle`, `:oval`, `:diamond`, `:bowtie`, 
+  `:vertical_bowtie`, `:vertical_bar`, `:up_triangle`, `:down_triangle`, `:right_triangle`, 
+  `:left_triangle`, `:star_5`, `:star_6`, `:var_box`, or a custom shape given as a vector of 
+  points or an SVG path string. Each shape has a `fill_color` and `line_color`. See `LayoutShape`.
+- A `:var_box` has one edge on the center line and the other at `size * p`, where `p` is an element 
+  parameter given by `height_param`, e.g. 
+  `LayoutShape(shape = :var_box, height_param = :Kn1, size = 0.5)`. It is above the center line 
+  for `p > 0` and below for `p < 0`.
+
+  ![Available lattice layout shapes](assets/layout_shapes.png)
+
+- Zero-length elements are drawn as wide as they are tall.
+- The shape, color, and size used for each element `kind` are in `DEFAULT_LAYOUT_SHAPES`. 
+  Override them per kind or per element name with `shapes = Dict("Quadrupole" => LayoutShape(color = :red))`.
+- `polarity = true` draws focusing quadrupoles above the center line and defocusing ones below.
+- `lat_layout_shapes(line)` returns what would be drawn, without drawing it.
+
+Note: Beamlines and Makie both export `LineElement`. If both are loaded with `using`, 
+refer to the lattice element type as `Beamlines.LineElement`.
