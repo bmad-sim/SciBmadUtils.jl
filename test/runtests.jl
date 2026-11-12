@@ -1,6 +1,7 @@
 using SciBmadUtils
 using Beamlines
 using OrderedCollections
+using Makie
 using YAML
 using Test
 
@@ -154,6 +155,134 @@ end
             @test occursin("description: \"a: \\\"quoted\\\" string\"", text)
             @test occursin("label: \"true\"", text)
             @test occursin("alias: plain text", text)
+        end
+    end
+
+    @testset "Lattice layout" begin
+        @testset "lat_layout_shapes" begin
+            qf = Quadrupole(name="QF", L=0.5, Kn1=0.4)
+            qd = Quadrupole(name="QD", L=0.5, Kn1=-0.4)
+            d  = Drift(L=1.0)
+            b  = SBend(name="B", L=2.0, angle=0.1)
+            m  = Marker(name="M")
+            hk = HKicker(name="HK")
+            bl = Beamline([qf, d, b, d, qd, m, hk])
+            les = lat_layout_shapes(bl)
+            # Drifts and markers are not drawn by default
+            @test [le.name for le in les] == ["QF", "B", "QD", "HK"]
+            @test [le.s_start for le in les] ≈ [0.0, 1.5, 4.5, 5.0]
+            @test [le.s_end for le in les] ≈ [0.5, 3.5, 5.0, 5.0]
+            @test les[1].shape == DEFAULT_LAYOUT_SHAPES["Quadrupole"]
+            @test les[1].y_bottom == -les[1].y_top == -DEFAULT_LAYOUT_SHAPES["Quadrupole"].size
+            @test les[4].shape.shape == :down_triangle
+
+            # polarity puts focusing quads above and defocusing quads below the center line
+            lesp = lat_layout_shapes(bl; polarity=true)
+            @test lesp[1].y_bottom == 0 && lesp[1].y_top > 0
+            @test lesp[3].y_top == 0 && lesp[3].y_bottom < 0
+            @test lesp[2].y_bottom == -lesp[2].y_top     # bends unaffected
+
+            # Overrides by kind and by name (name takes precedence)
+            shapes = Dict("Marker" => LayoutShape(color=:blue), "QD" => LayoutShape(draw=false),
+                          "Quadrupole" => LayoutShape(shape=:box, color=:red))
+            leso = lat_layout_shapes(bl; shapes=shapes)
+            @test [le.name for le in leso] == ["QF", "B", "M", "HK"]
+            @test leso[1].shape.color == :red && leso[1].shape.shape == :box
+
+            # Branch and Lattice
+            br = Branch([Beamline([qf, d]), Beamline([b, d, qd])])
+            lesb = lat_layout_shapes(br)
+            @test [le.s_start for le in lesb] ≈ [0.0, 1.5, 4.5]
+            @test [le.name for le in lat_layout_shapes(Lattice([br]))] == ["QF", "B", "QD"]
+        end
+
+        @testset "lat_layout" begin
+            qf = Quadrupole(name="QF", L=0.5, Kn1=0.4)
+            qd = Quadrupole(name="QD", L=0.5, Kn1=-0.4)
+            d  = Drift(L=1.0)
+            b  = SBend(L=2.0, angle=0.1)
+            hk = HKicker(name="HK")
+            bl = Beamline([qf, d, b, d, qd, hk])
+
+            fig = Figure()
+            ax  = Axis(fig[2, 1])
+            lines!(ax, [0.0, 5.0], [1.0, 2.0])
+            axl = lat_layout(fig[1, 1], bl; link=ax)
+            @test axl isa Axis
+            # center line, fills, outlines, zero-length element fill and outline, labels
+            @test length(axl.scene.plots) == 6
+            @test any(p -> p isa Makie.Text, axl.scene.plots)
+
+            axl2 = lat_layout(fig[3, 1], bl; labels=false, polarity=true)
+            @test !any(p -> p isa Makie.Text, axl2.scene.plots)
+
+            ax3 = Axis(fig[4, 1])
+            @test lat_layout!(ax3, Branch([bl])) === ax3
+
+            @test_throws ErrorException lat_layout(fig[5, 1], bl; shapes=Dict("SBend" => LayoutShape(shape=:hexagon)))
+        end
+
+        @testset "Shapes and colors" begin
+            all_shapes = [:box, :xbox, :x, :circle, :oval, :diamond, :bowtie, :vertical_bowtie,
+                          :vertical_bar, :up_triangle, :down_triangle, :right_triangle, :left_triangle,
+                          :star_5, :star_6, :var_box,
+                          [(0, 0), (2, 0), (1, 3)], "M 0 0 L 10 0 C 10 5 5 10 0 10 Z M 20 0 L 30 0 L 25 10 Z"]
+            for shape in all_shapes
+                o = SciBmadUtils._unit_outline(shape)
+                pts = [p for poly in [o.fills; o.strokes] for p in poly]
+                @test !isempty(o.strokes)
+                @test all(p -> -1e-12 <= p[1] <= 1 + 1e-12 && -1e-12 <= p[2] <= 1 + 1e-12, pts)
+            end
+            @test isempty(SciBmadUtils._unit_outline(:x).fills)
+            @test isempty(SciBmadUtils._unit_outline(:vertical_bar).fills)
+            @test length(SciBmadUtils._unit_outline(:bowtie).fills) == 2
+            @test length(SciBmadUtils._unit_outline(:star_5).fills[1]) == 10
+            @test length(SciBmadUtils._unit_outline(:star_6).fills[1]) == 12
+            # The SVG path has two subpaths and SVG y points down: the triangle vertex (25, 10) is at the bottom
+            svg = SciBmadUtils._unit_outline("M 0 0 L 10 0 C 10 5 5 10 0 10 Z M 20 0 L 30 0 L 25 10 Z")
+            @test length(svg.fills) == 2
+            @test (5/6, 0.0) in svg.fills[2]
+
+            # Every shape, on both finite and zero-length elements, with fill and line colors
+            eles = [Quadrupole(name="Q$i", L=(isodd(i) ? 0.5 : 0.0)) for i in 1:2length(all_shapes)]
+            bl = Beamline(reduce(vcat, [[e, Drift(L=1.0)] for e in eles]))
+            shapes = Dict("Q$i" => LayoutShape(shape=all_shapes[cld(i, 2)], fill_color=:yellow, line_color=:blue, height_param=:L)
+                          for i in 1:2length(all_shapes))
+            fig = Figure(size=(800, 300))
+            axl = lat_layout(fig[1, 1], bl; shapes=shapes)
+            polys = filter(p -> p isa Poly, axl.scene.plots)
+            @test all(p -> all(==(Makie.to_color(:yellow)), p.color[]), polys)
+            segs = filter(p -> p isa LineSegments, axl.scene.plots)
+            @test all(p -> all(==(Makie.to_color(:blue)), p.color[]), segs)
+
+            # var_box: height set by an element parameter, on the side given by its sign
+            qf = Quadrupole(name="QF", L=0.5, Kn1=0.4)
+            qd = Quadrupole(name="QD", L=0.5, Kn1=-0.2)
+            sx = Sextupole(name="SX", L=0.2, Kn2=3.0)
+            blv = Beamline([qf, Drift(L=1.0), qd, Drift(L=1.0), sx])
+            vshapes = Dict("Quadrupole" => LayoutShape(shape=:var_box, height_param=:Kn1, size=0.5),
+                           "Sextupole" => LayoutShape(shape=:var_box, height_param=:Kn1, size=0.5))
+            lesv = lat_layout_shapes(blv; shapes=vshapes, polarity=true)
+            @test (lesv[1].y_bottom, lesv[1].y_top) == (0.0, 0.2)
+            @test (lesv[2].y_bottom, lesv[2].y_top) == (-0.1, 0.0)
+            @test (lesv[3].y_bottom, lesv[3].y_top) == (0.0, 0.0)   # Sextupole has Kn1 = 0
+            fshapes = Dict("Quadrupole" => LayoutShape(shape=:var_box, height_param=e -> e.Kn1 * e.L, size=1.0))
+            lesf = lat_layout_shapes(blv; shapes=fshapes)
+            @test lesf[1].y_top ≈ 0.2 && lesf[2].y_bottom ≈ -0.1
+            @test_throws ErrorException lat_layout_shapes(blv; shapes=Dict("Quadrupole" => LayoutShape(shape=:var_box)))
+            axv = lat_layout(Figure()[1, 1], blv; shapes=vshapes)
+            @test any(p -> p isa Poly, axv.scene.plots)
+
+            # Zero-length elements are as wide as they are tall on screen
+            bl0 = Beamline([Drift(L=10.0), HKicker(name="HK"), Drift(L=10.0)])
+            fig = Figure(size=(800, 200))
+            axl = lat_layout(fig[1, 1], bl0)
+            Makie.update_state_before_display!(fig)
+            pts = filter(p -> p isa Poly, axl.scene.plots)[end][1][][1]
+            lims, vp = axl.finallimits[], axl.scene.viewport[]
+            w_px = (maximum(p[1] for p in pts) - minimum(p[1] for p in pts)) * Makie.widths(vp)[1] / Makie.widths(lims)[1]
+            h_px = (maximum(p[2] for p in pts) - minimum(p[2] for p in pts)) * Makie.widths(vp)[2] / Makie.widths(lims)[2]
+            @test w_px ≈ h_px rtol=1e-3
         end
     end
 end
