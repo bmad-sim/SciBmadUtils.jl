@@ -6,7 +6,7 @@
 """
     lat_layout!(ax, line; kwargs...) -> ax
 
-Draw a lattice layout of `line` (a `Beamline`, `Branch`, `Lattice` or vector of `LineElement`s)
+Draw a lattice layout of `line` (a `Beamline`, `Branch`, `Lattice` or vector of `LatElement`s)
 into the existing Makie `Axis` `ax`.
 
 The center line is at `y = 0` and shapes extend to at most `y = ±0.5`. Element labels are

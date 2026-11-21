@@ -117,7 +117,7 @@ One element to be drawn in a lattice layout. Produced by `lat_layout_shapes`.
 - `y_bottom`, `y_top`: Vertical extent of the shape. Normally symmetric about `y = 0`.
 - `name`, `kind`: Name and kind of the element.
 - `shape`: The `LayoutShape` used.
-- `ele`: The `LineElement` itself.
+- `ele`: The `LatElement` itself.
 """
 struct LayoutElement
   s_start::Float64
@@ -127,7 +127,7 @@ struct LayoutElement
   name::String
   kind::String
   shape::LayoutShape
-  ele::LineElement
+  ele::LatElement
 end
 
 function Base.show(io::IO, le::LayoutElement)
@@ -138,14 +138,14 @@ end
 #---------------------------------------------------------------------------------------------------
 
 _layout_elements(bl::Beamline) = bl.line
-_layout_elements(br::Branch) = reduce(vcat, (bl.line for bl in br.beamlines); init = LineElement[])
+_layout_elements(br::Branch) = reduce(vcat, (bl.line for bl in br.beamlines); init = LatElement[])
 _layout_elements(lat::Lattice; branch = 1) = _layout_elements(lat.branches[branch])
-_layout_elements(eles::AbstractVector{<:LineElement}) = eles
+_layout_elements(eles::AbstractVector{<:LatElement}) = eles
 
 # Strength used to decide which side of the center line an element goes when `polarity = true`.
 const _POLARITY_STRENGTH = Dict("Quadrupole" => :Kn1, "Sextupole" => :Kn2, "Octupole" => :Kn3)
 
-function _polarity_strength(ele::LineElement)
+function _polarity_strength(ele::LatElement)
   key = get(_POLARITY_STRENGTH, ele.kind, nothing)
   isnothing(key) && return 0.0
   try
@@ -156,7 +156,7 @@ function _polarity_strength(ele::LineElement)
 end
 
 # Value of the parameter that sets the height of a `:var_box`.
-function _height_param_value(ele::LineElement, param)
+function _height_param_value(ele::LatElement, param)
   isnothing(param) && error("A :var_box LayoutShape needs a `height_param` (e.g. `height_param = :Kn1`). ",
                             "Element: $(repr(ele.name)) ($(ele.kind)).")
   v = param isa Symbol ? getproperty(ele, param) : param(ele)
@@ -167,7 +167,7 @@ end
     lat_layout_shapes(line; shapes = Dict(), polarity = false, branch = 1) -> Vector{LayoutElement}
 
 Compute what is to be drawn in a lattice layout plot of `line`, which may be a `Beamline`,
-`Branch`, `Lattice` (in which case branch `branch` is used), or a vector of `LineElement`s
+`Branch`, `Lattice` (in which case branch `branch` is used), or a vector of `LatElement`s
 that are in a `Beamline`. This function does not use Makie and is used by `lat_layout!`.
 
 ## Keyword arguments

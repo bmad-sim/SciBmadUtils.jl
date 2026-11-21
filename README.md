@@ -13,6 +13,8 @@ This package holds:
 
 ## Installation
 
+Requires Beamlines 0.14 (Julia 1.10 or later).
+
 ```julia
 import Pkg
 Pkg.add(url="https://github.com/bmad-sim/SciBmadUtils.jl")
@@ -125,18 +127,21 @@ SciBmad kinds become PALS kinds as follows. Any other kind is written unchanged.
 | `HKicker`, `VKicker` | `Kicker`                              |
 | `BPM`                | `Instrument`                          |
 | `CrabCavity`, or `RFParams` with `is_crabcavity` | `CrabCavity` |
+| `Drift` with magnetic/electric multipoles | `Multipole` |
+| `Drift` with a solenoidal field | `Solenoid` |
 | no kind              | `Drift` if the length is nonzero, otherwise `Marker` |
 
 ### Parameter groups
 
 | SciBmad                | PALS                        | Notes |
 |------------------------|-----------------------------|-------|
-| `UniversalParams`      | `kind`, `length`, `TrackingP` | A non-default `tracking_method` goes in `TrackingP: SciBmad:` |
+| `UniversalParams`      | `kind`, `length`, `TrackingP` | A non-default `tracking_method` goes in `TrackingP: SciBmad:`; defaults follow the Beamlines 0.14 element constructors |
 | `MetaParams`           | `MetaP`                     | |
 | `AlignmentParams`      | `BodyShiftP`                | `tilt` → `z_rot` |
 | `ApertureParams`       | `ApertureP`                 | `x1_limit`, `x2_limit`, `y1_limit`, `y2_limit` → `x_min`, `x_max`, `y_min`, `y_max`. Infinite limits are left out. `aperture_shifts_with_body` is written when `true` since the PALS default is `false`. |
 | `BendParams`           | `BendP`                     | If `g_ref` is set but no dipole field (`Kn0`, `Bn0`, `Kn0L`, `Bn0L`), then `Kn0_from_g_ref: false` is written. A SciBmad bend has no field unless one is set. |
 | `BMultipoleParams`     | `MagneticMultipoleP`        | Same parameter names (`Kn1`, `Bs2L`, `tilt3`, ...) |
+| Solenoidal entries in `BMultipoleParams` | `SolenoidP` | `Ksol`/`Bsol`; integrated strengths are divided by the element length. A nonzero integrated solenoid at zero length raises an error. |
 | `EMultipoleParams`     | `ElectricMultipoleP`        | `etiltN` → `tiltN` |
 | `RFParams`             | `RFP`                       | `rf_frequency` → `frequency`, `phi0` → `phase` (radians in both), `traveling_wave` → `cavity_type: TRAVELING_WAVE` |
 | `PatchParams`          | `PatchP`                    | `dx`, `dy`, `dz`, `dx_rot`, `dy_rot`, `dz_rot` → `x_offset`, `y_offset`, `z_offset`, `x_rot`, `y_rot`, `z_rot`. `user_sets_length: true` is always written since a SciBmad patch length is set by the user. |
@@ -219,5 +224,4 @@ fig
 - `polarity = true` draws focusing quadrupoles above the center line and defocusing ones below.
 - `lat_layout_shapes(line)` returns what would be drawn, without drawing it.
 
-Note: Beamlines and Makie both export `LineElement`. If both are loaded with `using`, 
-refer to the lattice element type as `Beamlines.LineElement`.
+Beamlines 0.14 lattice elements use the type `LatElement`.

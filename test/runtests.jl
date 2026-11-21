@@ -14,6 +14,7 @@ function facility_entry(pals, name)
 end
 
 @testset "SciBmadUtils.jl" begin
+    include("pals_fields.jl")
     @testset "Elements" begin
         a = 0.36
         qf = Quadrupole(name="qf", L=0.5, Kn1=DefExpr(()->a), tilt1=0.1)
