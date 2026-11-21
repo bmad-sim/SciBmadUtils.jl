@@ -65,6 +65,7 @@ end
 function pals_group(group::BMultipoleParams)
     acc = OrderedDict{String,Any}()
     for bm in group
+        bm.order == 0 && continue # Solenoidal order belongs in SolenoidP.
         if !isdefault(bm.n)
             key = BMULTIPOLE_STRENGTH_INVERSE_MAP[(true, bm.order, bm.normalized, bm.integrated)]
             acc[String(key)] = pals_value(bm.n)
@@ -78,6 +79,52 @@ function pals_group(group::BMultipoleParams)
         end
     end
     return acc
+end
+
+"""
+    Internal: pals_solenoid(group::BMultipoleParams, length) -> OrderedDict
+
+PALS stores solenoids separately and has no integrated solenoid parameter.
+Convert the independently stored strength to Ksol or Bsol using the element length.
+"""
+function pals_solenoid(group::BMultipoleParams, length)
+    acc = OrderedDict{String,Any}()
+    for bm in group
+        bm.order == 0 || continue
+        iszero(bm.s) && iszero(bm.tilt) ||
+            error("PALS cannot represent a skew or tilted solenoidal multipole")
+        strength = bm.n
+        if bm.integrated
+            if iszero(length)
+                iszero(strength) || error("PALS cannot represent a nonzero integrated solenoid at zero length")
+            else
+                strength /= length
+            end
+        end
+        isdefault(strength) || (acc[bm.normalized ? "Ksol" : "Bsol"] = pals_value(strength))
+    end
+    return acc
+end
+
+# Beamlines 0.14 assigns tracking methods in its element constructors rather than
+# using SciBmadStandard(). Compare against the exported kind so a remapped drift retains a different
+# source tracking method (for example DriftKick on a PALS Solenoid).
+function default_tracking_method(kind::String, length)
+    iszero(length) && return Exact()
+    if kind in ("Solenoid", "RFCavity", "CrabCavity")
+        return SolenoidKick()
+    elseif kind in ("SBend", "Bend")
+        return BendKick()
+    elseif kind == "Quadrupole"
+        return MatrixKick()
+    elseif kind in ("Sextupole", "Octupole", "Multipole", "Drift", "VKicker", "HKicker", "Kicker")
+        return DriftKick()
+    elseif kind in ("Marker", "BPM", "Patch", "Map")
+        return Exact()
+    elseif kind == "BeamBeam"
+        return Implicit()
+    end
+    return nothing
 end
 
 function pals_group(group::EMultipoleParams)
@@ -127,14 +174,14 @@ function pals_tracking(method)
 end
 
 """
-    Internal: element_to_pals(ele::LineElement, context::Context) -> OrderedDict
+    Internal: element_to_pals(ele::LatElement, context::Context) -> OrderedDict
 
 Returns the PALS definition of the element `ele`, not including its name, with all
 `DefExpr`s evaluated in `context`. Inherited parameter groups are included.
 `BeamlineParams` and `InitialBeamlineParams` are not part of the definition: the reference
 parameters are written by `beamline_reference`.
 """
-function element_to_pals(ele::LineElement, context::Context)
+function element_to_pals(ele::LatElement, context::Context)
     pdict = flattened_pdict(ele)
     info = OrderedDict{String,Any}()
 
@@ -156,6 +203,20 @@ function element_to_pals(ele::LineElement, context::Context)
         isempty(group) || (info[name] = group)
     end
 
+    if haskey(pdict, BMultipoleParams)
+        solenoid = pals_solenoid(deval(pdict[BMultipoleParams], context), up.L)
+        isempty(solenoid) || (info["SolenoidP"] = solenoid)
+    end
+
+    # PALS Drift cannot carry fields. A Solenoid may carry other multipoles too.
+    if info["kind"] == "Drift"
+        if haskey(info, "SolenoidP")
+            info["kind"] = "Solenoid"
+        elseif haskey(info, "MagneticMultipoleP") || haskey(info, "ElectricMultipoleP")
+            info["kind"] = "Multipole"
+        end
+    end
+
     # SciBmad bends have no field unless a dipole multipole is set, whereas the PALS
     # default is to compute the dipole field from g_ref.
     if haskey(info, "BendP") && haskey(info["BendP"], "g_ref")
@@ -170,7 +231,7 @@ function element_to_pals(ele::LineElement, context::Context)
         get!(info, "PatchP", OrderedDict{String,Any}())["user_sets_length"] = true
     end
 
-    if up.tracking_method != SciBmadStandard()
+    if !isnothing(up.tracking_method) && up.tracking_method != default_tracking_method(info["kind"], up.L)
         info["TrackingP"] = OrderedDict{String,Any}("SciBmad" => pals_tracking(up.tracking_method))
     end
 
@@ -181,7 +242,12 @@ function element_to_pals(ele::LineElement, context::Context)
                 info["ApertureP"]["aperture_active"] = false
             else
                 i = findfirst(p -> p.first == T, PARAMS_TO_PALS_GROUP)
-                push!(ignored, isnothing(i) ? String(nameof(T)) : PARAMS_TO_PALS_GROUP[i].second)
+                if T == BMultipoleParams
+                    haskey(info, "MagneticMultipoleP") && push!(ignored, "MagneticMultipoleP")
+                    haskey(info, "SolenoidP") && push!(ignored, "SolenoidP")
+                else
+                    push!(ignored, isnothing(i) ? String(nameof(T)) : PARAMS_TO_PALS_GROUP[i].second)
+                end
             end
         end
         isempty(ignored) || (info["SciBmad_ignore_params"] = ignored)

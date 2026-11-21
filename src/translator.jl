@@ -52,12 +52,12 @@ function reserve_element_names!(tr::PALSTranslation, beamlines)
 end
 
 """
-    Internal: element_name!(tr::PALSTranslation, ele::LineElement, kind::String) -> String
+    Internal: element_name!(tr::PALSTranslation, ele::LatElement, kind::String) -> String
 
 Returns the PALS name of `ele`. Unnamed elements are given a name generated from the PALS
 `kind`. Unnamed elements that are copies of the same element share a name.
 """
-function element_name!(tr::PALSTranslation, ele::LineElement, kind::String)
+function element_name!(tr::PALSTranslation, ele::LatElement, kind::String)
     name = ele.name
     isempty(name) || return pals_name(name)
 
@@ -93,14 +93,14 @@ function dict_diff(base::AbstractDict, new::AbstractDict)
 end
 
 """
-    Internal: element_item!(tr::PALSTranslation, ele::LineElement)
+    Internal: element_item!(tr::PALSTranslation, ele::LatElement)
 
 Returns the PALS `line` item for `ele`. The first element with a given name is added to
 `tr.elements` and the item is just the name. Later elements with the same name but
 different parameters are written in the line with only the parameters that differ from
 the first, which PALS allows for an item that refers to an element defined elsewhere.
 """
-function element_item!(tr::PALSTranslation, ele::LineElement)
+function element_item!(tr::PALSTranslation, ele::LatElement)
     info = element_to_pals(ele, tr.context)
     name = element_name!(tr, ele, info["kind"])
     base = get(tr.elements, name, nothing)
